@@ -212,3 +212,71 @@
 
 (define-read-only (get-total-verifications)
   (var-get total-verifications))
+
+
+(define-map reference-requests {requester: principal, referee: principal} {
+  requested-at: uint,
+  message: (string-ascii 200),
+  status: (string-ascii 10)
+})
+
+(define-map professional-references {user: principal, referee: principal} {
+  relationship: (string-ascii 50),
+  testimonial: (string-ascii 800),
+  rating: uint,
+  approved-at: uint,
+  active: bool
+})
+
+(define-data-var total-references uint u0)
+
+(define-public (request-reference (referee principal) (message (string-ascii 200)))
+  (let ((requester tx-sender)
+        (request-key {requester: requester, referee: referee}))
+    (asserts! (not (is-eq requester referee)) err-invalid-input)
+    (asserts! (is-some (map-get? user-profiles requester)) err-not-found)
+    (asserts! (is-some (map-get? user-profiles referee)) err-not-found)
+    (asserts! (is-none (map-get? reference-requests request-key)) err-already-exists)
+    (map-set reference-requests request-key {
+      requested-at: stacks-block-height,
+      message: message,
+      status: "pending"
+    })
+    (ok true)))
+
+(define-public (approve-reference (requester principal) (relationship (string-ascii 50)) (testimonial (string-ascii 800)) (rating uint))
+  (let ((referee tx-sender)
+        (request-key {requester: requester, referee: referee})
+        (reference-key {user: requester, referee: referee}))
+    (asserts! (is-some (map-get? reference-requests request-key)) err-not-found)
+    (asserts! (and (>= rating u1) (<= rating u5)) err-invalid-input)
+    (map-set reference-requests request-key (merge 
+      (unwrap! (map-get? reference-requests request-key) err-not-found)
+      {status: "approved"}))
+    (map-set professional-references reference-key {
+      relationship: relationship,
+      testimonial: testimonial,
+      rating: rating,
+      approved-at: stacks-block-height,
+      active: true
+    })
+    (var-set total-references (+ (var-get total-references) u1))
+    (ok true)))
+
+(define-public (decline-reference (requester principal))
+  (let ((referee tx-sender)
+        (request-key {requester: requester, referee: referee}))
+    (asserts! (is-some (map-get? reference-requests request-key)) err-not-found)
+    (map-set reference-requests request-key (merge 
+      (unwrap! (map-get? reference-requests request-key) err-not-found)
+      {status: "declined"}))
+    (ok true)))
+
+(define-read-only (get-reference-request (requester principal) (referee principal))
+  (map-get? reference-requests {requester: requester, referee: referee}))
+
+(define-read-only (get-reference (user principal) (referee principal))
+  (map-get? professional-references {user: user, referee: referee}))
+
+(define-read-only (get-total-references)
+  (var-get total-references))
