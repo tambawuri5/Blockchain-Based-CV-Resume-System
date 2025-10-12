@@ -280,3 +280,79 @@
 
 (define-read-only (get-total-references)
   (var-get total-references))
+
+
+(define-map achievements {user: principal, achievement-id: uint} {
+  title: (string-ascii 100),
+  category: (string-ascii 30),
+  description: (string-ascii 500),
+  metric-value: uint,
+  metric-unit: (string-ascii 20),
+  date-achieved: uint,
+  proof-url: (optional (string-ascii 200)),
+  verified-by: (optional principal),
+  verification-date: (optional uint),
+  created-at: uint,
+  visibility: bool
+})
+
+(define-map user-achievement-counters principal uint)
+
+(define-data-var total-achievements uint u0)
+
+(define-constant err-achievement-not-found (err u105))
+(define-constant err-invalid-metric (err u106))
+
+(define-public (create-achievement (title (string-ascii 100)) (category (string-ascii 30)) (description (string-ascii 500)) (metric-value uint) (metric-unit (string-ascii 20)) (date-achieved uint) (proof-url (optional (string-ascii 200))))
+  (let ((user tx-sender)
+        (counter (default-to u0 (map-get? user-achievement-counters user)))
+        (achievement-id (+ counter u1))
+        (achievement-key {user: user, achievement-id: achievement-id}))
+    (asserts! (is-some (map-get? user-profiles user)) err-not-found)
+    (asserts! (> metric-value u0) err-invalid-metric)
+    (map-set achievements achievement-key {
+      title: title,
+      category: category,
+      description: description,
+      metric-value: metric-value,
+      metric-unit: metric-unit,
+      date-achieved: date-achieved,
+      proof-url: proof-url,
+      verified-by: none,
+      verification-date: none,
+      created-at: stacks-block-height,
+      visibility: true
+    })
+    (map-set user-achievement-counters user achievement-id)
+    (var-set total-achievements (+ (var-get total-achievements) u1))
+    (ok achievement-id)))
+
+(define-public (verify-achievement (user principal) (achievement-id uint))
+  (let ((verifier tx-sender)
+        (achievement-key {user: user, achievement-id: achievement-id})
+        (existing-achievement (unwrap! (map-get? achievements achievement-key) err-achievement-not-found)))
+    (asserts! (not (is-eq verifier user)) err-invalid-input)
+    (asserts! (is-some (map-get? user-profiles verifier)) err-not-found)
+    (map-set achievements achievement-key (merge existing-achievement {
+      verified-by: (some verifier),
+      verification-date: (some stacks-block-height)
+    }))
+    (ok true)))
+
+(define-public (toggle-achievement-visibility (achievement-id uint))
+  (let ((user tx-sender)
+        (achievement-key {user: user, achievement-id: achievement-id})
+        (existing-achievement (unwrap! (map-get? achievements achievement-key) err-achievement-not-found)))
+    (map-set achievements achievement-key (merge existing-achievement {
+      visibility: (not (get visibility existing-achievement))
+    }))
+    (ok true)))
+
+(define-read-only (get-achievement (user principal) (achievement-id uint))
+  (map-get? achievements {user: user, achievement-id: achievement-id}))
+
+(define-read-only (get-user-achievement-count (user principal))
+  (default-to u0 (map-get? user-achievement-counters user)))
+
+(define-read-only (get-total-achievements)
+  (var-get total-achievements))
