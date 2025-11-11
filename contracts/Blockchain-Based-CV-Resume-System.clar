@@ -356,3 +356,93 @@
 
 (define-read-only (get-total-achievements)
   (var-get total-achievements))
+
+
+(define-map portfolio-items {user: principal, item-id: uint} {
+  title: (string-ascii 100),
+  category: (string-ascii 30),
+  description: (string-ascii 500),
+  project-url: (string-ascii 200),
+  live-demo-url: (optional (string-ascii 200)),
+  technologies: (string-ascii 200),
+  start-date: uint,
+  completion-date: (optional uint),
+  view-count: uint,
+  validator-count: uint,
+  visibility: bool,
+  created-at: uint
+})
+
+(define-map portfolio-validators {user: principal, item-id: uint, validator: principal} {
+  validated-at: uint,
+  comment: (string-ascii 300),
+  active: bool
+})
+
+(define-map user-portfolio-counters principal uint)
+
+(define-data-var total-portfolio-items uint u0)
+
+(define-constant err-portfolio-not-found (err u107))
+
+(define-public (create-portfolio-item (title (string-ascii 100)) (category (string-ascii 30)) (description (string-ascii 500)) (project-url (string-ascii 200)) (live-demo-url (optional (string-ascii 200))))
+  (let ((user tx-sender)
+        (counter (default-to u0 (map-get? user-portfolio-counters user)))
+        (item-id (+ counter u1))
+        (item-key {user: user, item-id: item-id}))
+    (asserts! (is-some (map-get? user-profiles user)) err-not-found)
+    (map-set portfolio-items item-key {
+      title: title,
+      category: category,
+      description: description,
+      project-url: project-url,
+      live-demo-url: live-demo-url,
+      technologies: "",
+      start-date: stacks-block-height,
+      completion-date: none,
+      view-count: u0,
+      validator-count: u0,
+      visibility: true,
+      created-at: stacks-block-height
+    })
+    (map-set user-portfolio-counters user item-id)
+    (var-set total-portfolio-items (+ (var-get total-portfolio-items) u1))
+    (ok item-id)))
+
+(define-public (validate-portfolio-item (user principal) (item-id uint) (comment (string-ascii 300)))
+  (let ((validator tx-sender)
+        (item-key {user: user, item-id: item-id})
+        (validator-key {user: user, item-id: item-id, validator: validator})
+        (existing-item (unwrap! (map-get? portfolio-items item-key) err-portfolio-not-found)))
+    (asserts! (not (is-eq validator user)) err-invalid-input)
+    (asserts! (is-some (map-get? user-profiles validator)) err-not-found)
+    (asserts! (is-none (map-get? portfolio-validators validator-key)) err-already-exists)
+    (map-set portfolio-validators validator-key {
+      validated-at: stacks-block-height,
+      comment: comment,
+      active: true
+    })
+    (map-set portfolio-items item-key (merge existing-item {
+      validator-count: (+ (get validator-count existing-item) u1)
+    }))
+    (ok true)))
+
+(define-public (increment-portfolio-views (user principal) (item-id uint))
+  (let ((item-key {user: user, item-id: item-id})
+        (existing-item (unwrap! (map-get? portfolio-items item-key) err-portfolio-not-found)))
+    (map-set portfolio-items item-key (merge existing-item {
+      view-count: (+ (get view-count existing-item) u1)
+    }))
+    (ok true)))
+
+(define-read-only (get-portfolio-item (user principal) (item-id uint))
+  (map-get? portfolio-items {user: user, item-id: item-id}))
+
+(define-read-only (get-portfolio-validation (user principal) (item-id uint) (validator principal))
+  (map-get? portfolio-validators {user: user, item-id: item-id, validator: validator}))
+
+(define-read-only (get-user-portfolio-count (user principal))
+  (default-to u0 (map-get? user-portfolio-counters user)))
+
+(define-read-only (get-total-portfolio-items)
+  (var-get total-portfolio-items))
